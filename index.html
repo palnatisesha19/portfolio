@@ -9,6 +9,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --ink:#12181f;
@@ -288,148 +291,125 @@ let unlocked = false;
 const fmtINR = n => '₹' + (Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtDate = d => { if(!d) return '-'; const dt = new Date(d+'T00:00:00'); return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 
-/* ===================== STORAGE ===================== */
-/* window.storage only exists inside Claude's own artifact viewer. When this file is
-   downloaded and opened directly in a browser, that API isn't there — so every call
-   falls back to the browser's own localStorage instead, and if even that is blocked
-   (e.g. some browsers restrict it for file:// pages), it falls back to an in-memory
-   copy that lasts for the current tab only. */
-const hasCloudStorage = () => (typeof window.storage !== 'undefined' && typeof window.storage.get === 'function');
-const memoryStore = {};
-async function storageGet(key){
-  if(hasCloudStorage()){
-    try{ const r = await window.storage.get(key); return r ? r.value : null; }catch(e){ /* fall through */ }
-  }
-  try{ const v = localStorage.getItem(key); if(v!==null) return v; }catch(e){ /* fall through */ }
-  return Object.prototype.hasOwnProperty.call(memoryStore,key) ? memoryStore[key] : null;
+/* ===================== FIREBASE CONFIG ===================== */
+/* Fill this in with YOUR OWN Firebase project's config (Project settings →
+   General → Your apps → SDK setup and configuration). These values are not
+   secret — Firebase protects data with the security rules on your project,
+   not by hiding this config — so it's fine for this to sit in a public
+   index.html. See the README for full setup steps. */
+const firebaseConfig = {
+  apiKey: "AIzaSyCdE0fvmZ-QAXMtial1SiANrnBmh0bS_2w",
+  authDomain: "myportfoliotracker-3ce48.firebaseapp.com",
+  projectId: "myportfoliotracker-3ce48",
+  storageBucket: "myportfoliotracker-3ce48.firebasestorage.app",
+  messagingSenderId: "206839618237",
+  appId: "1:206839618237:web:4ce5ab56f3907128c175d4"
+};
+const FIREBASE_READY = firebaseConfig.apiKey !== "YOUR_API_KEY";
+let fbApp, auth, db, currentUser = null, unsubscribeDoc = null;
+if(FIREBASE_READY){
+  fbApp = firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth();
+  db = firebase.firestore();
 }
-async function storageSet(key, value){
-  if(hasCloudStorage()){
-    try{ await window.storage.set(key, value); return; }catch(e){ /* fall through */ }
-  }
-  try{ localStorage.setItem(key, value); return; }catch(e){ /* fall through */ }
-  memoryStore[key] = value;
-}
-
-let currentAccount = null; // slug of the signed-in account
 
 function slugify(name){
   return name.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
 }
-async function getAccountList(){
-  try{ const v = await storageGet('pm_accounts'); return v ? JSON.parse(v) : []; }catch(e){ return []; }
-}
-async function addToAccountList(slug, displayName){
-  const list = await getAccountList();
-  if(!list.find(a=>a.slug===slug)){ list.push({slug, displayName}); await storageSet('pm_accounts', JSON.stringify(list)); }
-}
-function keyFor(base){ return currentAccount ? base+'_'+currentAccount : base; }
+function emailForAccount(name){ return slugify(name) + '@portfolio-manager.local'; }
 
-async function loadState(){
-  try{ const v = await storageGet(keyFor('pm_buys')); buys = v ? JSON.parse(v) : []; }catch(e){ buys = []; }
-  try{ const v = await storageGet(keyFor('pm_sells')); sells = v ? JSON.parse(v) : []; }catch(e){ sells = []; }
-  try{ const v = await storageGet(keyFor('pm_dividends')); dividends = v ? JSON.parse(v) : []; }catch(e){ dividends = []; }
+/* Local writes update Firestore; a realtime listener on the same document
+   pushes any change (from this device or any other signed-in device) back
+   into buys/sells/dividends and re-renders — that's what makes syncing
+   "live" across devices instead of needing a manual refresh. */
+async function saveBuys(){ await pushDoc(); }
+async function saveSells(){ await pushDoc(); }
+async function saveDivs(){ await pushDoc(); }
+async function pushDoc(){
+  if(!currentUser) return;
+  await db.collection('portfolios').doc(currentUser.uid).set({
+    buys, sells, dividends, updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, {merge:true});
 }
-async function saveBuys(){ await storageSet(keyFor('pm_buys'), JSON.stringify(buys)); }
-async function saveSells(){ await storageSet(keyFor('pm_sells'), JSON.stringify(sells)); }
-async function saveDivs(){ await storageSet(keyFor('pm_dividends'), JSON.stringify(dividends)); }
+function subscribeToDoc(){
+  if(unsubscribeDoc) unsubscribeDoc();
+  unsubscribeDoc = db.collection('portfolios').doc(currentUser.uid).onSnapshot(snap=>{
+    const data = snap.data() || {};
+    buys = data.buys || [];
+    sells = data.sells || [];
+    dividends = data.dividends || [];
+    if(unlocked) renderAll();
+  }, err=>{ console.error('Portfolio Manager: sync error', err); });
+}
 
 /* ===================== AUTH ===================== */
-async function getStoredPw(slug){
-  try{ return await storageGet('pm_auth_'+slug); }catch(e){ return null; }
-}
-async function setStoredPw(slug, pw){ await storageSet('pm_auth_'+slug, pw); }
-
 async function initAuth(){
-  document.getElementById('account-input').addEventListener('blur', refreshLoginModeForAccount);
+  if(!FIREBASE_READY){
+    document.getElementById('login-sub').textContent = 'This copy is not yet connected to a database — see the README for a one-time setup step.';
+  }
+  document.getElementById('pw-submit').addEventListener('click', handlePwSubmit);
+  document.getElementById('pw-input').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
+  document.getElementById('pw-input-confirm').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
   document.getElementById('account-input').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('pw-input').focus(); });
 }
-async function refreshLoginModeForAccount(){
-  const name = document.getElementById('account-input').value;
-  const confirmInput = document.getElementById('pw-input-confirm');
-  const errEl = document.getElementById('login-error');
-  errEl.textContent = '';
-  if(!name.trim()){ confirmInput.style.display='none'; return; }
-  try{
-    const slug = slugify(name);
-    const existing = await getStoredPw(slug);
-    if(!existing){
-      document.getElementById('login-sub').textContent = `"${name.trim()}" is a new account — set a password to create it.`;
-      confirmInput.style.display = 'block';
-    } else {
-      document.getElementById('login-sub').textContent = `Welcome back, ${name.trim()}. Enter your password.`;
-      confirmInput.style.display = 'none';
-    }
-  }catch(err){
-    confirmInput.style.display = 'block';
-  }
-}
-document.getElementById('pw-submit').addEventListener('click', handlePwSubmit);
-document.getElementById('pw-input').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
-document.getElementById('pw-input-confirm').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
 
 async function handlePwSubmit(){
   const errEl = document.getElementById('login-error');
   errEl.textContent = '';
+  if(!FIREBASE_READY){ errEl.textContent = 'Database not configured yet — see the README.'; return; }
+  const name = document.getElementById('account-input').value.trim();
+  const pw = document.getElementById('pw-input').value;
+  if(!name){ errEl.textContent = 'Enter an account name.'; return; }
+  if(!slugify(name)){ errEl.textContent = 'Account name must include letters or numbers.'; return; }
+  if(!pw){ errEl.textContent = 'Enter a password.'; return; }
+  const email = emailForAccount(name);
+  const confirmInput = document.getElementById('pw-input-confirm');
   try{
-    const name = document.getElementById('account-input').value.trim();
-    if(!name){ errEl.textContent = 'Enter an account name.'; return; }
-    const slug = slugify(name);
-    if(!slug){ errEl.textContent = 'Account name must include letters or numbers.'; return; }
-    const existing = await getStoredPw(slug);
-    const pw = document.getElementById('pw-input').value;
-    if(!pw){ errEl.textContent = 'Enter a password.'; return; }
-    if(!existing){
-      const confirmPw = document.getElementById('pw-input-confirm').value;
-      if(pw.length < 4){ errEl.textContent = 'Use at least 4 characters.'; return; }
-      if(pw !== confirmPw){ errEl.textContent = 'Passwords do not match.'; return; }
-      const isVeryFirstAccount = (await getAccountList()).length === 0;
-      await setStoredPw(slug, pw);
-      await addToAccountList(slug, name);
-      currentAccount = slug;
-      await enterApp(isVeryFirstAccount);
+    const methods = await auth.fetchSignInMethodsForEmail(email);
+    if(methods.length === 0){
+      // brand new account
+      if(confirmInput.style.display !== 'block'){
+        // first click just for this name — ask them to confirm the new password before creating it
+        confirmInput.style.display = 'block';
+        document.getElementById('login-sub').textContent = `"${name}" is a new account — confirm your password to create it.`;
+        return;
+      }
+      if(pw.length < 6){ errEl.textContent = 'Use at least 6 characters (Firebase minimum).'; return; }
+      if(pw !== confirmInput.value){ errEl.textContent = 'Passwords do not match.'; return; }
+      const cred = await auth.createUserWithEmailAndPassword(email, pw);
+      await cred.user.updateProfile({displayName: name});
+      currentUser = cred.user;
+      await db.collection('portfolios').doc(currentUser.uid).set({displayName:name, buys:[], sells:[], dividends:[]});
+      subscribeToDoc();
+      enterApp(name);
     } else {
-      if(pw === existing){ currentAccount = slug; await enterApp(false); }
-      else { errEl.textContent = 'Incorrect password.'; }
+      const cred = await auth.signInWithEmailAndPassword(email, pw);
+      currentUser = cred.user;
+      subscribeToDoc();
+      enterApp(name);
     }
   }catch(err){
-    errEl.textContent = 'Something went wrong opening the vault: ' + (err && err.message ? err.message : err);
+    if(err.code === 'auth/wrong-password') errEl.textContent = 'Incorrect password.';
+    else if(err.code === 'auth/too-many-requests') errEl.textContent = 'Too many attempts — wait a moment and try again.';
+    else errEl.textContent = 'Something went wrong: ' + err.message;
   }
 }
-async function seedIfEmpty(){
-  if(buys.length || sells.length || dividends.length) return;
-  buys = [
-    {id: uid(), date:'2026-06-29', security:'WIPRO LTD', qty:100, price:175.6, gross:17581.66, description:'', _order:0},
-    {id: uid(), date:'2026-07-03', security:'LLOYDS ENTERPRISES LTD', qty:100, price:74.69, gross:0, description:'', _order:1},
-    {id: uid(), date:'2026-07-03', security:'WIPRO LTD', qty:60, price:177.09, gross:0, description:'', _order:2},
-    {id: uid(), date:'2026-07-03', security:'COFFEE DAY ENTERPRISE LTD', qty:100, price:32.5, gross:21369.2, description:'', _order:3},
-    {id: uid(), date:'2026-07-13', security:'WIPRO LTD', qty:300, price:178.46, gross:53602, description:'', _order:4},
-  ];
-  dividends = [
-    {id: uid(), date:'2026-06-29', security:'WIPRO LTD', qty:100, perShare:2, tds:0, description:'', _order:0},
-    {id: uid(), date:'2026-07-03', security:'WIPRO LTD', qty:60, perShare:2, tds:0, description:'', _order:1},
-    {id: uid(), date:'2026-07-13', security:'WIPRO LTD', qty:300, perShare:2, tds:0, description:'', _order:2},
-  ];
-  await saveBuys(); await saveDivs();
-}
-async function enterApp(seedDemoIfEmpty){
-  try{
-    await loadState();
-    if(seedDemoIfEmpty) await seedIfEmpty();
-  }catch(err){
-    // even if loading/seeding stumbles, still let the person in with whatever loaded
-    console.error('Portfolio Manager: state load issue', err);
-  }
+
+function enterApp(name){
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
-  document.getElementById('active-account-label').textContent = document.getElementById('account-input').value.trim();
+  document.getElementById('active-account-label').textContent = name;
   unlocked = true;
   renderAll();
 }
 function lockApp(){
   unlocked = false;
-  currentAccount = null;
+  if(unsubscribeDoc){ unsubscribeDoc(); unsubscribeDoc = null; }
+  if(auth) auth.signOut();
+  currentUser = null;
+  buys = []; sells = []; dividends = [];
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('account-input').value = '';
@@ -528,7 +508,7 @@ function renderOverview(){
   else {
     body = '<tbody>' + rows.map(r=>`
       <tr>
-        <td>${r.sec}</td>
+        <td>${esc(r.sec)}</td>
         <td class="num mono">${r.qty}</td>
         <td class="num mono">${fmtINR(r.avgPrice)}</td>
         <td class="num mono">${fmtINR(r.invested)}</td>
@@ -564,11 +544,11 @@ function renderBuyLedger(){
       rowsHtml += `<tr class="${isLast?'subtotal-row':''}">
         <td class="mono">${slNo}</td>
         <td>${fmtDate(b.date)}</td>
-        <td>${b.security}</td>
+        <td>${esc(b.security)}</td>
         <td class="num mono">${b.qty}</td>
         <td class="num mono">${fmtINR(b.price)}</td>
         <td class="num mono">${fmtINR(buyAmount)}</td>
-        <td style="white-space:normal;max-width:180px;color:var(--text-dim);font-size:12px">${b.description||''}</td>
+        <td style="white-space:normal;max-width:180px;color:var(--text-dim);font-size:12px">${esc(b.description)}</td>
         <td class="num mono">${isLast? fmtINR(sumQty) : '-'}</td>
         <td class="num mono">${isLast? fmtINR(grossPaid) : '-'}</td>
         <td class="num mono">${isLast? fmtINR(taxes) : '-'}</td>
@@ -615,11 +595,11 @@ function renderSellLedger(){
       rowsHtml += `<tr class="${isLast?'subtotal-row':''}">
         <td class="mono">${slNo}</td>
         <td>${fmtDate(s.date)}</td>
-        <td>${s.security}</td>
+        <td>${esc(s.security)}</td>
         <td class="num mono">${s.qty}</td>
         <td class="num mono">${fmtINR(s.price)}</td>
         <td class="num mono">${fmtINR(sellAmount)}</td>
-        <td style="white-space:normal;max-width:160px;color:var(--text-dim);font-size:12px">${s.description||''}</td>
+        <td style="white-space:normal;max-width:160px;color:var(--text-dim);font-size:12px">${esc(s.description)}</td>
         <td class="num mono">${isLast? fmtINR(sumQty) : '-'}</td>
         <td class="num mono">${isLast? fmtINR(grossRecd) : '-'}</td>
         <td class="num mono">${isLast? fmtINR(taxes) : '-'}</td>
@@ -651,13 +631,13 @@ function renderDividendLedger(){
     rowsHtml += `<tr>
       <td class="mono">${idx+1}</td>
       <td>${fmtDate(d.date)}</td>
-      <td>${d.security}</td>
+      <td>${esc(d.security)}</td>
       <td class="num mono">${d.qty}</td>
       <td class="num mono">${fmtINR(d.perShare)}</td>
       <td class="num mono">${fmtINR(gross)}</td>
       <td class="num mono">${fmtINR(d.tds||0)}</td>
       <td class="num mono">${fmtINR(net)}</td>
-      <td style="white-space:normal;max-width:160px;color:var(--text-dim);font-size:12px">${d.description||''}</td>
+      <td style="white-space:normal;max-width:160px;color:var(--text-dim);font-size:12px">${esc(d.description)}</td>
       <td class="row-actions">
         <button onclick="editDiv('${d.id}')">Edit</button>
         <button class="del" onclick="deleteDiv('${d.id}')">Delete</button>
