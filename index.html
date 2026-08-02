@@ -417,6 +417,36 @@ function enterApp(name){
   document.getElementById('active-account-label').textContent = name;
   unlocked = true;
   renderAll();
+  setTimeout(()=>offerLegacyImport(name), 700); // give the first Firestore snapshot a moment to arrive
+}
+
+/* Earlier versions of this dashboard (before Firebase) saved data in this
+   browser's own localStorage. If that old data is still sitting here and
+   this account's Firestore doc looks empty, offer to bring it across once. */
+async function offerLegacyImport(name){
+  try{
+    if(buys.length || sells.length || dividends.length) return; // already has real data, nothing to recover
+    const slug = slugify(name);
+    const readLegacy = (suffixedKey, bareKey) => {
+      try{
+        const v = localStorage.getItem(suffixedKey) || localStorage.getItem(bareKey);
+        return v ? JSON.parse(v) : [];
+      }catch(e){ return []; }
+    };
+    const oldBuys = readLegacy('pm_buys_'+slug, 'pm_buys');
+    const oldSells = readLegacy('pm_sells_'+slug, 'pm_sells');
+    const oldDividends = readLegacy('pm_dividends_'+slug, 'pm_dividends');
+    const total = oldBuys.length + oldSells.length + oldDividends.length;
+    if(total === 0) return;
+    const ok = confirm(`Found ${oldBuys.length} buy(s), ${oldSells.length} sell(s) and ${oldDividends.length} dividend(s) saved in this browser from before accounts moved to the database. Import them into "${name}" now?`);
+    if(!ok) return;
+    buys = oldBuys; sells = oldSells; dividends = oldDividends;
+    await pushDoc();
+    ['pm_buys_'+slug,'pm_sells_'+slug,'pm_dividends_'+slug,'pm_buys','pm_sells','pm_dividends'].forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
+    renderAll();
+  }catch(err){
+    console.error('Portfolio Manager: legacy import check failed', err);
+  }
 }
 function lockApp(){
   unlocked = false;
