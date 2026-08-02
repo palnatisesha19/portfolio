@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portfolio Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root{
+    --ink:#12181f;
+    --panel:#1a222c;
+    --panel-2:#212b37;
+    --line:#2c3846;
+    --gold:#c9a24b;
+    --gold-dim:#8a7130;
+    --text:#e8e3d8;
+    --text-dim:#9aa5b1;
+    --teal:#4f9d8d;
+    --rust:#b5654a;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--ink);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;}
+  ::selection{background:var(--gold);color:var(--ink);}
+
+  /* ---------- LOGIN ---------- */
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:24px;text-align:center;}
+  .seal{width:74px;height:74px;border-radius:50%;border:2px solid var(--gold);display:flex;align-items:center;justify-content:center;margin-bottom:22px;position:relative;}
+  .seal svg{width:34px;height:34px;stroke:var(--gold);}
+  .seal::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:1px solid var(--gold-dim);}
+  #login-screen h1{font-size:28px;letter-spacing:0.5px;margin-bottom:6px;}
+  #login-screen p{color:var(--text-dim);font-size:14px;margin-bottom:26px;max-width:340px;}
+  .pw-form{display:flex;flex-direction:column;gap:12px;width:280px;}
+  input[type=password],input[type=text],input[type=number],input[type=date],select,textarea{
+    background:var(--panel-2);border:1px solid var(--line);color:var(--text);padding:10px 12px;
+    border-radius:8px;font-size:14px;font-family:'Inter',sans-serif;width:100%;
+  }
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold-dim);}
+  button{cursor:pointer;font-family:'Inter',sans-serif;font-weight:600;border:none;border-radius:8px;font-size:14px;transition:filter .15s ease;}
+  button:hover{filter:brightness(1.12);}
+  .btn-gold{background:var(--gold);color:#1a1206;padding:10px 16px;}
+  .btn-ghost{background:transparent;color:var(--text-dim);border:1px solid var(--line);padding:10px 16px;}
+  .btn-ghost:hover{color:var(--text);border-color:var(--gold-dim);}
+  #login-error{color:var(--rust);font-size:13px;min-height:18px;}
+
+  /* ---------- APP SHELL ---------- */
+  #app{display:none;}
+  header.top{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--line);}
+  header.top .brand{display:flex;align-items:center;gap:12px;}
+  header.top .brand .mark{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--gold);display:flex;align-items:center;justify-content:center;}
+  header.top .brand .mark svg{width:16px;height:16px;stroke:var(--gold);}
+  header.top h1{font-size:19px;}
+  header.top .sub{color:var(--text-dim);font-size:12px;margin-top:2px;}
+  header.top .lock-btn{background:none;border:1px solid var(--line);color:var(--text-dim);padding:8px 14px;border-radius:8px;font-size:12px;}
+  header.top .lock-btn:hover{color:var(--gold);border-color:var(--gold-dim);}
+
+  nav.tabs{display:flex;gap:4px;padding:0 28px;border-bottom:1px solid var(--line);}
+  nav.tabs button{background:none;color:var(--text-dim);padding:14px 16px;border-bottom:2px solid transparent;border-radius:0;font-size:13.5px;letter-spacing:.2px;}
+  nav.tabs button.active{color:var(--gold);border-bottom-color:var(--gold);}
+  nav.tabs button:hover{color:var(--text);}
+
+  main{padding:24px 28px 60px;max-width:1280px;margin:0 auto;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-bottom:20px;}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;}
+  .panel-head h2{font-size:17px;}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;}
+  .toolbar button{background:var(--panel-2);color:var(--text-dim);border:1px solid var(--line);padding:8px 13px;font-size:12.5px;}
+  .toolbar button:hover{color:var(--gold);border-color:var(--gold-dim);}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{text-align:left;color:var(--text-dim);font-weight:600;font-size:11px;letter-spacing:.4px;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  tbody td{padding:9px 10px;border-bottom:1px solid #212b37;white-space:nowrap;}
+  tbody tr:hover{background:#1e2733;}
+  tr.subtotal-row td{border-top:1px solid var(--gold-dim);border-bottom:1px solid var(--line);background:#1c2531;color:var(--gold);font-weight:600;}
+  tr.subtotal-row td.dim{color:var(--text-dim);font-weight:400;}
+  .num{font-family:'IBM Plex Mono',monospace;text-align:right;}
+  .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-family:'IBM Plex Mono',monospace;}
+  .tag-long{background:rgba(79,157,141,.15);color:var(--teal);}
+  .tag-short{background:rgba(181,101,74,.15);color:var(--rust);}
+  .row-actions button{background:none;border:none;color:var(--text-dim);font-size:12px;padding:3px 6px;}
+  .row-actions button:hover{color:var(--gold);}
+  .row-actions .del:hover{color:var(--rust);}
+  .empty-state{color:var(--text-dim);font-size:13px;padding:20px 4px;text-align:center;}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px;}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;}
+  .kpi .label{color:var(--text-dim);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;}
+  .kpi .value{font-family:'IBM Plex Mono',monospace;font-size:22px;color:var(--gold);}
+
+  /* modal */
+  .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(8,11,15,.7);align-items:center;justify-content:center;z-index:50;padding:20px;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px;width:100%;max-width:440px;max-height:88vh;overflow-y:auto;}
+  .modal h3{font-size:17px;margin-bottom:16px;}
+  .field{margin-bottom:13px;}
+  .field label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:5px;}
+  .field-row{display:flex;gap:10px;}
+  .field-row .field{flex:1;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}
+  .hint{font-size:11.5px;color:var(--text-dim);margin-top:4px;line-height:1.4;}
+
+  footer.note{color:var(--text-dim);font-size:11.5px;text-align:center;padding:20px 28px 40px;line-height:1.6;}
+  @media(max-width:640px){
+    header.top{padding:14px;} main{padding:16px;} nav.tabs{padding:0 14px;overflow-x:auto;}
+    table{font-size:12px;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login-screen">
+  <div class="seal"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+  <h1 id="login-title">Portfolio Manager</h1>
+  <p id="login-sub">A private vault for your holdings. Set a password to protect it.</p>
+  <div class="pw-form">
+    <input type="password" id="pw-input" placeholder="Password" autocomplete="off">
+    <input type="password" id="pw-input-confirm" placeholder="Confirm password" style="display:none;" autocomplete="off">
+    <div id="login-error"></div>
+    <button class="btn-gold" id="pw-submit">Enter</button>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+      <div>
+        <h1>Portfolio Manager</h1>
+        <div class="sub">Amounts in ₹ (INR)</div>
+      </div>
+    </div>
+    <button class="lock-btn" onclick="lockApp()">Lock vault</button>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="buy">Buy ledger</button>
+    <button data-tab="sell">Sell ledger</button>
+    <button data-tab="dividend">Dividend ledger</button>
+  </nav>
+
+  <main>
+    <!-- OVERVIEW -->
+    <section id="tab-overview">
+      <div class="kpi-grid" id="kpi-grid"></div>
+      <div class="panel">
+        <div class="panel-head"><h2>Current holdings</h2></div>
+        <div style="overflow-x:auto"><table id="holdings-table"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- BUY LEDGER -->
+    <section id="tab-buy" style="display:none">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Buy ledger</h2>
+          <div class="toolbar">
+            <button onclick="exportLedger('buy','xlsx')">Excel</button>
+            <button onclick="exportLedger('buy','pdf')">PDF</button>
+            <button onclick="exportLedger('buy','doc')">Word</button>
+            <button onclick="exportLedger('buy','txt')">Text</button>
+            <button class="btn-gold" style="padding:8px 14px" onclick="openBuyModal()">+ Add buy</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto"><table id="buy-table"><thead></thead><tbody></tbody></table></div>
+        <div class="hint" style="margin-top:10px">Rows are grouped by trade date. The gross paid, taxes &amp; charges, sum qty. in one day trade, and count only appear once — on the last trade of that day — as a day subtotal, matching your sheet.</div>
+      </div>
+    </section>
+
+    <!-- SELL LEDGER -->
+    <section id="tab-sell" style="display:none">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Sell ledger</h2>
+          <div class="toolbar">
+            <button onclick="exportLedger('sell','xlsx')">Excel</button>
+            <button onclick="exportLedger('sell','pdf')">PDF</button>
+            <button onclick="exportLedger('sell','doc')">Word</button>
+            <button onclick="exportLedger('sell','txt')">Text</button>
+            <button class="btn-gold" style="padding:8px 14px" onclick="openSellModal()">+ Add sell</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto"><table id="sell-table"><thead></thead><tbody></tbody></table></div>
+        <div class="hint" style="margin-top:10px">Holding period is measured against the earliest still-open buy lot for that stock (FIFO), the method used for Indian capital-gains classification. Equity held over 12 months is treated as long-term.</div>
+      </div>
+    </section>
+
+    <!-- DIVIDEND LEDGER -->
+    <section id="tab-dividend" style="display:none">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Dividend ledger</h2>
+          <div class="toolbar">
+            <button onclick="exportLedger('dividend','xlsx')">Excel</button>
+            <button onclick="exportLedger('dividend','pdf')">PDF</button>
+            <button onclick="exportLedger('dividend','doc')">Word</button>
+            <button onclick="exportLedger('dividend','txt')">Text</button>
+            <button class="btn-gold" style="padding:8px 14px" onclick="openDivModal()">+ Add dividend</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto"><table id="dividend-table"><thead></thead><tbody></tbody></table></div>
+        <div class="hint" style="margin-top:10px">Net dividend = gross dividend − TDS.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="note">
+    Data is saved to your private, persistent storage for this dashboard and reloads automatically next time you open this link — nothing is written to a local drive, since a browser app can't reach your C: drive.<br>
+    This tool is a personal tracker, not tax advice — confirm capital-gains treatment with a professional before filing.
+  </footer>
+</div>
+
+<!-- ================= MODALS ================= -->
+<div class="modal-backdrop" id="buy-modal">
+  <div class="modal">
+    <h3 id="buy-modal-title">Add buy</h3>
+    <input type="hidden" id="buy-id">
+    <div class="field"><label>Trade date</label><input type="date" id="buy-date"></div>
+    <div class="field"><label>Security name</label><input type="text" id="buy-security" placeholder="e.g. WIPRO LTD"></div>
+    <div class="field-row">
+      <div class="field"><label>Quantity</label><input type="number" id="buy-qty" min="0" step="1"></div>
+      <div class="field"><label>Stock price per unit (₹)</label><input type="number" id="buy-price" min="0" step="0.01"></div>
+    </div>
+    <div class="field"><label>Gross paid for this trade (₹, incl. taxes &amp; charges)</label><input type="number" id="buy-gross" min="0" step="0.01"></div>
+    <div class="field"><label>Description <span style="color:var(--text-dim)">(optional — e.g. "bonus issue 1:1, no cost")</span></label><textarea id="buy-desc" rows="2"></textarea></div>
+    <div class="hint" id="buy-hint">Buy amount = quantity × price. Leave price at 0 for a bonus/rights issue with no cost.</div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeModal('buy-modal')">Cancel</button>
+      <button class="btn-gold" onclick="saveBuy()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="sell-modal">
+  <div class="modal">
+    <h3 id="sell-modal-title">Add sell</h3>
+    <input type="hidden" id="sell-id">
+    <div class="field"><label>Sell date</label><input type="date" id="sell-date"></div>
+    <div class="field"><label>Security name</label><select id="sell-security"></select></div>
+    <div class="field-row">
+      <div class="field"><label>Quantity sold</label><input type="number" id="sell-qty" min="0" step="1"></div>
+      <div class="field"><label>Sell price per unit (₹)</label><input type="number" id="sell-price" min="0" step="0.01"></div>
+    </div>
+    <div class="field"><label>Gross received for this trade (₹, after taxes &amp; charges)</label><input type="number" id="sell-gross" min="0" step="0.01"></div>
+    <div class="field"><label>Description <span style="color:var(--text-dim)">(optional)</span></label><textarea id="sell-desc" rows="2"></textarea></div>
+    <div class="hint">Sell amount = quantity × price. Holding period is calculated automatically against your earliest open buy lot.</div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeModal('sell-modal')">Cancel</button>
+      <button class="btn-gold" onclick="saveSell()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="div-modal">
+  <div class="modal">
+    <h3 id="div-modal-title">Add dividend</h3>
+    <input type="hidden" id="div-id">
+    <div class="field"><label>Date</label><input type="date" id="div-date"></div>
+    <div class="field"><label>Security name</label><select id="div-security"></select></div>
+    <div class="field-row">
+      <div class="field"><label>Quantity held</label><input type="number" id="div-qty" min="0" step="1"></div>
+      <div class="field"><label>Dividend per share (₹)</label><input type="number" id="div-per-share" min="0" step="0.01"></div>
+    </div>
+    <div class="field"><label>TDS deducted (₹)</label><input type="number" id="div-tds" min="0" step="0.01" value="0"></div>
+    <div class="field"><label>Description <span style="color:var(--text-dim)">(optional)</span></label><textarea id="div-desc" rows="2"></textarea></div>
+    <div class="hint">Gross dividend = quantity × dividend per share. Net dividend = gross − TDS.</div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeModal('div-modal')">Cancel</button>
+      <button class="btn-gold" onclick="saveDiv()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===================== STATE ===================== */
+let buys = [], sells = [], dividends = [];
+let unlocked = false;
+
+const fmtINR = n => '₹' + (Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtDate = d => { if(!d) return '-'; const dt = new Date(d+'T00:00:00'); return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); };
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+/* ===================== STORAGE ===================== */
+/* window.storage only exists inside Claude's own artifact viewer. When this file is
+   downloaded and opened directly in a browser, that API isn't there — so every call
+   falls back to the browser's own localStorage instead, and if even that is blocked
+   (e.g. some browsers restrict it for file:// pages), it falls back to an in-memory
+   copy that lasts for the current tab only. */
+const hasCloudStorage = () => (typeof window.storage !== 'undefined' && typeof window.storage.get === 'function');
+const memoryStore = {};
+async function storageGet(key){
+  if(hasCloudStorage()){
+    try{ const r = await window.storage.get(key); return r ? r.value : null; }catch(e){ /* fall through */ }
+  }
+  try{ const v = localStorage.getItem(key); if(v!==null) return v; }catch(e){ /* fall through */ }
+  return Object.prototype.hasOwnProperty.call(memoryStore,key) ? memoryStore[key] : null;
+}
+async function storageSet(key, value){
+  if(hasCloudStorage()){
+    try{ await window.storage.set(key, value); return; }catch(e){ /* fall through */ }
+  }
+  try{ localStorage.setItem(key, value); return; }catch(e){ /* fall through */ }
+  memoryStore[key] = value;
+}
+
+async function loadState(){
+  try{ const v = await storageGet('pm_buys'); buys = v ? JSON.parse(v) : []; }catch(e){ buys = []; }
+  try{ const v = await storageGet('pm_sells'); sells = v ? JSON.parse(v) : []; }catch(e){ sells = []; }
+  try{ const v = await storageGet('pm_dividends'); dividends = v ? JSON.parse(v) : []; }catch(e){ dividends = []; }
+}
+async function saveBuys(){ await storageSet('pm_buys', JSON.stringify(buys)); }
+async function saveSells(){ await storageSet('pm_sells', JSON.stringify(sells)); }
+async function saveDivs(){ await storageSet('pm_dividends', JSON.stringify(dividends)); }
+
+/* ===================== AUTH ===================== */
+async function getStoredPw(){
+  try{ return await storageGet('pm_auth'); }catch(e){ return null; }
+}
+async function setStoredPw(pw){ await storageSet('pm_auth', pw); }
+
+async function initAuth(){
+  try{
+    const existing = await getStoredPw();
+    const confirmInput = document.getElementById('pw-input-confirm');
+    if(!existing){
+      document.getElementById('login-sub').textContent = 'First time here — set a password to lock your vault.';
+      confirmInput.style.display = 'block';
+    }
+  }catch(err){
+    document.getElementById('login-error').textContent = 'Could not check for a saved password — you can still set one now.';
+    document.getElementById('pw-input-confirm').style.display = 'block';
+  }
+}
+document.getElementById('pw-submit').addEventListener('click', handlePwSubmit);
+document.getElementById('pw-input').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
+
+async function handlePwSubmit(){
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  try{
+    const existing = await getStoredPw();
+    const pw = document.getElementById('pw-input').value;
+    if(!pw){ errEl.textContent = 'Enter a password.'; return; }
+    if(!existing){
+      const confirmPw = document.getElementById('pw-input-confirm').value;
+      if(pw.length < 4){ errEl.textContent = 'Use at least 4 characters.'; return; }
+      if(pw !== confirmPw){ errEl.textContent = 'Passwords do not match.'; return; }
+      await setStoredPw(pw);
+      await enterApp();
+    } else {
+      if(pw === existing){ await enterApp(); }
+      else { errEl.textContent = 'Incorrect password.'; }
+    }
+  }catch(err){
+    errEl.textContent = 'Something went wrong opening the vault: ' + (err && err.message ? err.message : err);
+  }
+}
+async function seedIfEmpty(){
+  if(buys.length || sells.length || dividends.length) return;
+  buys = [
+    {id: uid(), date:'2026-06-29', security:'WIPRO LTD', qty:100, price:175.6, gross:17581.66, description:'', _order:0},
+    {id: uid(), date:'2026-07-03', security:'LLOYDS ENTERPRISES LTD', qty:100, price:74.69, gross:0, description:'', _order:1},
+    {id: uid(), date:'2026-07-03', security:'WIPRO LTD', qty:60, price:177.09, gross:0, description:'', _order:2},
+    {id: uid(), date:'2026-07-03', security:'COFFEE DAY ENTERPRISE LTD', qty:100, price:32.5, gross:21369.2, description:'', _order:3},
+    {id: uid(), date:'2026-07-13', security:'WIPRO LTD', qty:300, price:178.46, gross:53602, description:'', _order:4},
+  ];
+  dividends = [
+    {id: uid(), date:'2026-06-29', security:'WIPRO LTD', qty:100, perShare:2, tds:0, description:'', _order:0},
+    {id: uid(), date:'2026-07-03', security:'WIPRO LTD', qty:60, perShare:2, tds:0, description:'', _order:1},
+    {id: uid(), date:'2026-07-13', security:'WIPRO LTD', qty:300, perShare:2, tds:0, description:'', _order:2},
+  ];
+  await saveBuys(); await saveDivs();
+}
+async function enterApp(){
+  try{
+    await loadState();
+    await seedIfEmpty();
+  }catch(err){
+    // even if loading/seeding stumbles, still let the person in with whatever loaded
+    console.error('Portfolio Manager: state load issue', err);
+  }
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  unlocked = true;
+  renderAll();
+}
+function lockApp(){
+  unlocked = false;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('pw-input').value = '';
+  document.getElementById('pw-input-confirm').value = '';
+  document.getElementById('login-error').textContent = '';
+}
+
+/* ===================== TABS ===================== */
+document.querySelectorAll('nav.tabs button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    ['overview','buy','sell','dividend'].forEach(t=>{
+      document.getElementById('tab-'+t).style.display = (t===btn.dataset.tab)?'block':'none';
+    });
+  });
+});
+
+/* ===================== HELPERS ===================== */
+function groupByDate(list, dateKey){
+  const map = {};
+  list.forEach(item=>{ (map[item[dateKey]] = map[item[dateKey]]||[]).push(item); });
+  return Object.keys(map).sort().map(date=>({date, items: map[date]}));
+}
+function monthsDaysYears(fromDate, toDate){
+  const a = new Date(fromDate+'T00:00:00'), b = new Date(toDate+'T00:00:00');
+  let years = b.getFullYear()-a.getFullYear();
+  let months = b.getMonth()-a.getMonth();
+  let days = b.getDate()-a.getDate();
+  if(days<0){ months--; const prevMonth = new Date(b.getFullYear(), b.getMonth(), 0).getDate(); days += prevMonth; }
+  if(months<0){ years--; months += 12; }
+  const totalMonths = years*12+months;
+  return {years, months, days, totalMonths};
+}
+function findFifoLot(security, beforeDate){
+  // earliest buy of this security on/before sell date with remaining unsold qty
+  const lots = buys.filter(b=>b.security===security).sort((x,y)=>x.date.localeCompare(y.date));
+  const soldSoFar = {};
+  sells.filter(s=>s.security===security).sort((x,y)=>x.date.localeCompare(y.date));
+  // simple running allocation: consume lots FIFO by all sells up to (not including) current one is complex without sell id ordering;
+  // For holding-period purposes we just return the earliest lot's date.
+  return lots.length ? lots[0] : null;
+}
+function securityList(){
+  const s = new Set(buys.map(b=>b.security));
+  return Array.from(s).sort();
+}
+function netQty(security){
+  const bought = buys.filter(b=>b.security===security).reduce((a,b)=>a+Number(b.qty),0);
+  const sold = sells.filter(s=>s.security===security).reduce((a,s)=>a+Number(s.qty),0);
+  return bought - sold;
+}
+
+/* ===================== RENDER: OVERVIEW ===================== */
+function renderOverview(){
+  const secs = securityList();
+  const today = new Date().toISOString().slice(0,10);
+  let totalInvested = 0, totalReceived = 0, totalDivNet = 0, holdingCount = 0;
+
+  const rows = secs.map(sec=>{
+    const secBuys = buys.filter(b=>b.security===sec);
+    const totalQtyBought = secBuys.reduce((a,b)=>a+Number(b.qty),0);
+    const totalCost = secBuys.reduce((a,b)=>a+Number(b.qty)*Number(b.price),0);
+    const avgPrice = totalQtyBought? totalCost/totalQtyBought : 0;
+    const qty = netQty(sec);
+    totalInvested += totalCost;
+    if(qty>0){
+      holdingCount++;
+      const firstLot = secBuys.sort((a,b)=>a.date.localeCompare(b.date))[0];
+      const dur = monthsDaysYears(firstLot.date, today);
+      const isLong = dur.totalMonths >= 12;
+      return {sec, qty, avgPrice, invested: qty*avgPrice, since: firstLot.date, dur, isLong};
+    }
+    return null;
+  }).filter(Boolean);
+
+  totalReceived = sells.reduce((a,s)=>a+Number(s.gross||0),0);
+  totalDivNet = dividends.reduce((a,d)=>a+((Number(d.qty)*Number(d.perShare))-Number(d.tds||0)),0);
+
+  document.getElementById('kpi-grid').innerHTML = `
+    <div class="kpi"><div class="label">Holdings (live)</div><div class="value">${holdingCount}</div></div>
+    <div class="kpi"><div class="label">Total invested (buys)</div><div class="value">${fmtINR(totalInvested)}</div></div>
+    <div class="kpi"><div class="label">Total received (sells)</div><div class="value">${fmtINR(totalReceived)}</div></div>
+    <div class="kpi"><div class="label">Net dividends received</div><div class="value">${fmtINR(totalDivNet)}</div></div>
+  `;
+
+  const thead = `<thead><tr>
+    <th>Security</th><th class="num">Qty held</th><th class="num">Avg. price</th><th class="num">Invested (at avg.)</th>
+    <th>Held since</th><th>Holding period</th><th>Classification</th>
+  </tr></thead>`;
+  let body = '';
+  if(!rows.length){ body = `<tbody><tr><td colspan="7" class="empty-state">No open holdings yet — add a buy to get started.</td></tr></tbody>`; }
+  else {
+    body = '<tbody>' + rows.map(r=>`
+      <tr>
+        <td>${r.sec}</td>
+        <td class="num mono">${r.qty}</td>
+        <td class="num mono">${fmtINR(r.avgPrice)}</td>
+        <td class="num mono">${fmtINR(r.invested)}</td>
+        <td>${fmtDate(r.since)}</td>
+        <td class="mono">${r.dur.years}y ${r.dur.months}m ${r.dur.days}d</td>
+        <td>${r.isLong?'<span class="tag tag-long">Long-term</span>':'<span class="tag tag-short">Short-term</span>'}</td>
+      </tr>`).join('') + '</tbody>';
+  }
+  document.getElementById('holdings-table').innerHTML = thead + body;
+}
+
+/* ===================== RENDER: BUY LEDGER ===================== */
+function renderBuyLedger(){
+  const thead = `<thead><tr>
+    <th>Sl. no.</th><th>Trade date</th><th>Security name</th><th class="num">Quantity</th><th class="num">Price/unit</th>
+    <th class="num">Buy amount</th><th>Description</th><th class="num">Sum qty. in one day trade</th>
+    <th class="num">Gross paid</th><th class="num">Taxes &amp; charges</th><th class="num">Count</th><th></th>
+  </tr></thead>`;
+  const groups = groupByDate(buys, 'date');
+  let slNo = 0;
+  let rowsHtml = '';
+  if(!groups.length){ rowsHtml = `<tr><td colspan="12" class="empty-state">No buys recorded yet.</td></tr>`; }
+  groups.forEach(g=>{
+    const items = g.items.slice().sort((a,b)=> (a._order||0)-(b._order||0));
+    const sumQty = items.reduce((a,i)=>a+Number(i.qty)*Number(i.price),0);
+    const grossPaid = items.reduce((a,i)=>a+Number(i.gross||0),0);
+    const taxes = grossPaid - sumQty;
+    const count = items.length;
+    items.forEach((b, idx)=>{
+      slNo++;
+      const isLast = idx === items.length-1;
+      const buyAmount = Number(b.qty)*Number(b.price);
+      rowsHtml += `<tr class="${isLast?'subtotal-row':''}">
+        <td class="mono">${slNo}</td>
+        <td>${fmtDate(b.date)}</td>
+        <td>${b.security}</td>
+        <td class="num mono">${b.qty}</td>
+        <td class="num mono">${fmtINR(b.price)}</td>
+        <td class="num mono">${fmtINR(buyAmount)}</td>
+        <td style="white-space:normal;max-width:180px;color:var(--text-dim);font-size:12px">${b.description||''}</td>
+        <td class="num mono">${isLast? fmtINR(sumQty) : '-'}</td>
+        <td class="num mono">${isLast? fmtINR(grossPaid) : '-'}</td>
+        <td class="num mono">${isLast? fmtINR(taxes) : '-'}</td>
+        <td class="num mono">${isLast? count : '-'}</td>
+        <td class="row-actions">
+          <button onclick="editBuy('${b.id}')">Edit</button>
+          <button class="del" onclick="deleteBuy('${b.id}')">Delete</button>
+        </td>
+      </tr>`;
+    });
+  });
+  document.getElementById('buy-table').innerHTML = thead + '<tbody>' + rowsHtml + '</tbody>';
+}
+
+/* ===================== RENDER: SELL LEDGER ===================== */
+function renderSellLedger(){
+  const thead = `<thead><tr>
+    <th>Sl. no.</th><th>Sell date</th><th>Security name</th><th class="num">Quantity</th><th class="num">Price/unit</th>
+    <th class="num">Sell amount</th><th>Description</th><th class="num">Sum qty. in one day trade</th>
+    <th class="num">Gross received</th><th class="num">Taxes &amp; charges</th><th class="num">Count</th>
+    <th>Holding period</th><th>Classification</th><th></th>
+  </tr></thead>`;
+  const groups = groupByDate(sells, 'date');
+  let slNo = 0;
+  let rowsHtml = '';
+  if(!groups.length){ rowsHtml = `<tr><td colspan="14" class="empty-state">No sells recorded yet.</td></tr>`; }
+  groups.forEach(g=>{
+    const items = g.items.slice().sort((a,b)=> (a._order||0)-(b._order||0));
+    const sumQty = items.reduce((a,i)=>a+Number(i.qty)*Number(i.price),0);
+    const grossRecd = items.reduce((a,i)=>a+Number(i.gross||0),0);
+    const taxes = sumQty - grossRecd; // charges reduce what you receive
+    const count = items.length;
+    items.forEach((s, idx)=>{
+      slNo++;
+      const isLast = idx === items.length-1;
+      const sellAmount = Number(s.qty)*Number(s.price);
+      const lot = findFifoLot(s.security, s.date);
+      let durLabel = '-', tagHtml = '-';
+      if(lot){
+        const dur = monthsDaysYears(lot.date, s.date);
+        durLabel = `${dur.years}y ${dur.months}m ${dur.days}d`;
+        tagHtml = dur.totalMonths>=12 ? '<span class="tag tag-long">Long-term</span>' : '<span class="tag tag-short">Short-term</span>';
+      }
+      rowsHtml += `<tr class="${isLast?'subtotal-row':''}">
+        <td class="mono">${slNo}</td>
+        <td>${fmtDate(s.date)}</td>
+        <td>${s.security}</td>
+        <td class="num mono">${s.qty}</td>
+        <td class="num mono">${fmtINR(s.price)}</td>
+        <td class="num mono">${fmtINR(sellAmount)}</td>
+        <td style="white-space:normal;max-width:160px;color:var(--text-dim);font-size:12px">${s.description||''}</td>
+        <td class="num mono">${isLast? fmtINR(sumQty) : '-'}</td>
+        <td class="num mono">${isLast? fmtINR(grossRecd) : '-'}</td>
+        <td class="num mono">${isLast? fmtINR(taxes) : '-'}</td>
+        <td class="num mono">${isLast? count : '-'}</td>
+        <td class="mono">${durLabel}</td>
+        <td>${tagHtml}</td>
+        <td class="row-actions">
+          <button onclick="editSell('${s.id}')">Edit</button>
+          <button class="del" onclick="deleteSell('${s.id}')">Delete</button>
+        </td>
+      </tr>`;
+    });
+  });
+  document.getElementById('sell-table').innerHTML = thead + '<tbody>' + rowsHtml + '</tbody>';
+}
+
+/* ===================== RENDER: DIVIDEND LEDGER ===================== */
+function renderDividendLedger(){
+  const thead = `<thead><tr>
+    <th>Sl. no.</th><th>Date</th><th>Security name</th><th class="num">Qty held</th><th class="num">Dividend/share</th>
+    <th class="num">Gross dividend</th><th class="num">TDS</th><th class="num">Net dividend</th><th>Description</th><th></th>
+  </tr></thead>`;
+  const list = dividends.slice().sort((a,b)=> a.date.localeCompare(b.date) || (a._order||0)-(b._order||0));
+  let rowsHtml = '';
+  if(!list.length){ rowsHtml = `<tr><td colspan="10" class="empty-state">No dividends recorded yet.</td></tr>`; }
+  list.forEach((d, idx)=>{
+    const gross = Number(d.qty)*Number(d.perShare);
+    const net = gross - Number(d.tds||0);
+    rowsHtml += `<tr>
+      <td class="mono">${idx+1}</td>
+      <td>${fmtDate(d.date)}</td>
+      <td>${d.security}</td>
+      <td class="num mono">${d.qty}</td>
+      <td class="num mono">${fmtINR(d.perShare)}</td>
+      <td class="num mono">${fmtINR(gross)}</td>
+      <td class="num mono">${fmtINR(d.tds||0)}</td>
+      <td class="num mono">${fmtINR(net)}</td>
+      <td style="white-space:normal;max-width:160px;color:var(--text-dim);font-size:12px">${d.description||''}</td>
+      <td class="row-actions">
+        <button onclick="editDiv('${d.id}')">Edit</button>
+        <button class="del" onclick="deleteDiv('${d.id}')">Delete</button>
+      </td>
+    </tr>`;
+  });
+  document.getElementById('dividend-table').innerHTML = thead + '<tbody>' + rowsHtml + '</tbody>';
+}
+
+function renderAll(){ renderOverview(); renderBuyLedger(); renderSellLedger(); renderDividendLedger(); }
+
+/* ===================== MODALS: BUY ===================== */
+function openBuyModal(id){
+  document.getElementById('buy-modal-title').textContent = id? 'Edit buy' : 'Add buy';
+  document.getElementById('buy-id').value = id||'';
+  if(id){
+    const b = buys.find(x=>x.id===id);
+    document.getElementById('buy-date').value = b.date;
+    document.getElementById('buy-security').value = b.security;
+    document.getElementById('buy-qty').value = b.qty;
+    document.getElementById('buy-price').value = b.price;
+    document.getElementById('buy-gross').value = b.gross||'';
+    document.getElementById('buy-desc').value = b.description||'';
+  } else {
+    ['buy-date','buy-security','buy-qty','buy-price','buy-gross','buy-desc'].forEach(f=>document.getElementById(f).value='');
+  }
+  document.getElementById('buy-modal').style.display='flex';
+}
+function editBuy(id){ openBuyModal(id); }
+async function saveBuy(){
+  const id = document.getElementById('buy-id').value;
+  const date = document.getElementById('buy-date').value;
+  const security = document.getElementById('buy-security').value.trim().toUpperCase();
+  const qty = Number(document.getElementById('buy-qty').value);
+  const price = Number(document.getElementById('buy-price').value)||0;
+  const gross = Number(document.getElementById('buy-gross').value)||0;
+  const description = document.getElementById('buy-desc').value.trim();
+  if(!date || !security || !qty){ alert('Please fill in date, security name and quantity.'); return; }
+  if(id){
+    const b = buys.find(x=>x.id===id);
+    Object.assign(b, {date, security, qty, price, gross, description});
+  } else {
+    buys.push({id: uid(), date, security, qty, price, gross, description, _order: buys.length});
+  }
+  await saveBuys();
+  closeModal('buy-modal');
+  renderAll();
+}
+async function deleteBuy(id){
+  if(!confirm('Delete this buy entry? This cannot be undone.')) return;
+  buys = buys.filter(x=>x.id!==id);
+  await saveBuys();
+  renderAll();
+}
+
+/* ===================== MODALS: SELL ===================== */
+function openSellModal(id){
+  document.getElementById('sell-modal-title').textContent = id? 'Edit sell' : 'Add sell';
+  document.getElementById('sell-id').value = id||'';
+  const sel = document.getElementById('sell-security');
+  sel.innerHTML = securityList().map(s=>`<option value="${s}">${s}</option>`).join('');
+  if(id){
+    const s = sells.find(x=>x.id===id);
+    document.getElementById('sell-date').value = s.date;
+    sel.value = s.security;
+    document.getElementById('sell-qty').value = s.qty;
+    document.getElementById('sell-price').value = s.price;
+    document.getElementById('sell-gross').value = s.gross||'';
+    document.getElementById('sell-desc').value = s.description||'';
+  } else {
+    ['sell-date','sell-qty','sell-price','sell-gross','sell-desc'].forEach(f=>document.getElementById(f).value='');
+  }
+  document.getElementById('sell-modal').style.display='flex';
+}
+function editSell(id){ openSellModal(id); }
+async function saveSell(){
+  const id = document.getElementById('sell-id').value;
+  const date = document.getElementById('sell-date').value;
+  const security = document.getElementById('sell-security').value;
+  const qty = Number(document.getElementById('sell-qty').value);
+  const price = Number(document.getElementById('sell-price').value)||0;
+  const gross = Number(document.getElementById('sell-gross').value)||0;
+  const description = document.getElementById('sell-desc').value.trim();
+  if(!date || !security || !qty){ alert('Please fill in date, security name and quantity.'); return; }
+  if(id){
+    const s = sells.find(x=>x.id===id);
+    Object.assign(s, {date, security, qty, price, gross, description});
+  } else {
+    sells.push({id: uid(), date, security, qty, price, gross, description, _order: sells.length});
+  }
+  await saveSells();
+  closeModal('sell-modal');
+  renderAll();
+}
+async function deleteSell(id){
+  if(!confirm('Delete this sell entry? This cannot be undone.')) return;
+  sells = sells.filter(x=>x.id!==id);
+  await saveSells();
+  renderAll();
+}
+
+/* ===================== MODALS: DIVIDEND ===================== */
+function openDivModal(id){
+  document.getElementById('div-modal-title').textContent = id? 'Edit dividend' : 'Add dividend';
+  document.getElementById('div-id').value = id||'';
+  const sel = document.getElementById('div-security');
+  sel.innerHTML = securityList().map(s=>`<option value="${s}">${s}</option>`).join('');
+  if(id){
+    const d = dividends.find(x=>x.id===id);
+    document.getElementById('div-date').value = d.date;
+    sel.value = d.security;
+    document.getElementById('div-qty').value = d.qty;
+    document.getElementById('div-per-share').value = d.perShare;
+    document.getElementById('div-tds').value = d.tds||0;
+    document.getElementById('div-desc').value = d.description||'';
+  } else {
+    ['div-date','div-qty','div-per-share','div-desc'].forEach(f=>document.getElementById(f).value='');
+    document.getElementById('div-tds').value = 0;
+  }
+  document.getElementById('div-modal').style.display='flex';
+}
+function editDiv(id){ openDivModal(id); }
+async function saveDiv(){
+  const id = document.getElementById('div-id').value;
+  const date = document.getElementById('div-date').value;
+  const security = document.getElementById('div-security').value;
+  const qty = Number(document.getElementById('div-qty').value);
+  const perShare = Number(document.getElementById('div-per-share').value)||0;
+  const tds = Number(document.getElementById('div-tds').value)||0;
+  const description = document.getElementById('div-desc').value.trim();
+  if(!date || !security){ alert('Please fill in date and security name.'); return; }
+  if(id){
+    const d = dividends.find(x=>x.id===id);
+    Object.assign(d, {date, security, qty, perShare, tds, description});
+  } else {
+    dividends.push({id: uid(), date, security, qty, perShare, tds, description, _order: dividends.length});
+  }
+  await saveDivs();
+  closeModal('div-modal');
+  renderAll();
+}
+async function deleteDiv(id){
+  if(!confirm('Delete this dividend entry? This cannot be undone.')) return;
+  dividends = dividends.filter(x=>x.id!==id);
+  await saveDivs();
+  renderAll();
+}
+
+function closeModal(id){ document.getElementById(id).style.display='none'; }
+document.querySelectorAll('.modal-backdrop').forEach(m=>{
+  m.addEventListener('click', e=>{ if(e.target===m) m.style.display='none'; });
+});
+
+/* ===================== EXPORTS ===================== */
+function buildExportRows(kind){
+  if(kind==='buy'){
+    const header = ['Sl. no.','Trade date','Security name','Quantity','Stock price per unit','Buy amount','Description','Sum qty. in one day trade','Gross paid','Taxes & charges','Count'];
+    const rows = [header];
+    const groups = groupByDate(buys,'date');
+    let slNo=0;
+    groups.forEach(g=>{
+      const items = g.items.slice().sort((a,b)=>(a._order||0)-(b._order||0));
+      const sumQty = items.reduce((a,i)=>a+Number(i.qty)*Number(i.price),0);
+      const grossPaid = items.reduce((a,i)=>a+Number(i.gross||0),0);
+      const taxes = grossPaid - sumQty;
+      items.forEach((b,idx)=>{
+        slNo++; const isLast = idx===items.length-1; const amt = Number(b.qty)*Number(b.price);
+        rows.push([slNo, fmtDate(b.date), b.security, b.qty, b.price, amt.toFixed(2), b.description||'', isLast?sumQty.toFixed(2):'-', isLast?grossPaid.toFixed(2):'-', isLast?taxes.toFixed(2):'-', isLast?items.length:'-']);
+      });
+    });
+    return {header, rows, title:'Buy Ledger'};
+  }
+  if(kind==='sell'){
+    const header = ['Sl. no.','Sell date','Security name','Quantity','Sell price per unit','Sell amount','Description','Sum qty. in one day trade','Gross received','Taxes & charges','Count','Holding period','Classification'];
+    const rows = [header];
+    const groups = groupByDate(sells,'date');
+    let slNo=0;
+    groups.forEach(g=>{
+      const items = g.items.slice().sort((a,b)=>(a._order||0)-(b._order||0));
+      const sumQty = items.reduce((a,i)=>a+Number(i.qty)*Number(i.price),0);
+      const grossRecd = items.reduce((a,i)=>a+Number(i.gross||0),0);
+      const taxes = sumQty - grossRecd;
+      items.forEach((s,idx)=>{
+        slNo++; const isLast = idx===items.length-1; const amt = Number(s.qty)*Number(s.price);
+        const lot = findFifoLot(s.security, s.date);
+        let durLabel='-', cls='-';
+        if(lot){ const dur = monthsDaysYears(lot.date, s.date); durLabel = `${dur.years}y ${dur.months}m ${dur.days}d`; cls = dur.totalMonths>=12?'Long-term':'Short-term'; }
+        rows.push([slNo, fmtDate(s.date), s.security, s.qty, s.price, amt.toFixed(2), s.description||'', isLast?sumQty.toFixed(2):'-', isLast?grossRecd.toFixed(2):'-', isLast?taxes.toFixed(2):'-', isLast?items.length:'-', durLabel, cls]);
+      });
+    });
+    return {header, rows, title:'Sell Ledger'};
+  }
+  if(kind==='dividend'){
+    const header = ['Sl. no.','Date','Security name','Qty held','Dividend per share','Gross dividend','TDS','Net dividend','Description'];
+    const rows = [header];
+    dividends.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach((d,idx)=>{
+      const gross = Number(d.qty)*Number(d.perShare); const net = gross-Number(d.tds||0);
+      rows.push([idx+1, fmtDate(d.date), d.security, d.qty, d.perShare, gross.toFixed(2), (d.tds||0).toFixed(2), net.toFixed(2), d.description||'']);
+    });
+    return {header, rows, title:'Dividend Ledger'};
+  }
+}
+
+function exportLedger(kind, format){
+  const {header, rows, title} = buildExportRows(kind);
+  const filename = 'Portfolio_'+title.replace(/\s+/g,'_');
+  if(format==='xlsx'){
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, title.slice(0,31));
+    XLSX.writeFile(wb, filename+'.xlsx');
+  } else if(format==='pdf'){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({orientation:'landscape'});
+    doc.setFontSize(14);
+    doc.text(title, 14, 14);
+    doc.autoTable({ head:[header], body: rows.slice(1), startY:20, styles:{fontSize:7}, headStyles:{fillColor:[26,34,44]} });
+    doc.save(filename+'.pdf');
+  } else if(format==='doc'){
+    let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">';
+    html += '<head><meta charset="utf-8"><title>'+title+'</title></head><body>';
+    html += '<h2>'+title+'</h2><table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-family:Arial;font-size:11px;">';
+    rows.forEach((r,i)=>{
+      html += '<tr>'+r.map(c=> (i===0? '<th>'+c+'</th>' : '<td>'+c+'</td>')).join('')+'</tr>';
+    });
+    html += '</table></body></html>';
+    const blob = new Blob(['\ufeff', html], {type:'application/msword'});
+    downloadBlob(blob, filename+'.doc');
+  } else if(format==='txt'){
+    const text = rows.map(r=>r.join('\t')).join('\n');
+    const blob = new Blob([text], {type:'text/plain'});
+    downloadBlob(blob, filename+'.txt');
+  }
+}
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* ===================== INIT ===================== */
+initAuth();
+</script>
+</body>
+</html>
