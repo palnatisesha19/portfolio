@@ -367,32 +367,46 @@ async function handlePwSubmit(){
   const email = emailForAccount(name);
   const confirmInput = document.getElementById('pw-input-confirm');
   try{
-    const methods = await auth.fetchSignInMethodsForEmail(email);
-    if(methods.length === 0){
-      // brand new account
-      if(confirmInput.style.display !== 'block'){
-        // first click just for this name — ask them to confirm the new password before creating it
-        confirmInput.style.display = 'block';
-        document.getElementById('login-sub').textContent = `"${name}" is a new account — confirm your password to create it.`;
-        return;
-      }
-      if(pw.length < 6){ errEl.textContent = 'Use at least 6 characters (Firebase minimum).'; return; }
-      if(pw !== confirmInput.value){ errEl.textContent = 'Passwords do not match.'; return; }
-      const cred = await auth.createUserWithEmailAndPassword(email, pw);
-      await cred.user.updateProfile({displayName: name});
-      currentUser = cred.user;
-      await db.collection('portfolios').doc(currentUser.uid).set({displayName:name, buys:[], sells:[], dividends:[]});
-      subscribeToDoc();
-      enterApp(name);
-    } else {
+    // Always try signing in first — this works whether or not the account
+    // already exists, and sidesteps Firebase's "email enumeration protection"
+    // (on by default for newer projects), which makes it impossible to
+    // reliably ask "does this account exist yet?" ahead of time.
+    try{
       const cred = await auth.signInWithEmailAndPassword(email, pw);
       currentUser = cred.user;
       subscribeToDoc();
       enterApp(name);
+      return;
+    }catch(signInErr){
+      const notFoundLike = ['auth/user-not-found','auth/invalid-credential','auth/wrong-password'].includes(signInErr.code);
+      if(!notFoundLike) throw signInErr;
+      // Sign-in failed — could be a brand-new account, or an existing one with a typo'd password.
+      if(confirmInput.style.display !== 'block'){
+        confirmInput.style.display = 'block';
+        document.getElementById('login-sub').textContent = `Couldn't sign in as "${name}". If this is a new account, confirm your password below to create it — otherwise re-check your password.`;
+        return;
+      }
+      if(pw.length < 6){ errEl.textContent = 'Use at least 6 characters (Firebase minimum).'; return; }
+      if(pw !== confirmInput.value){ errEl.textContent = 'Passwords do not match.'; return; }
+      try{
+        const cred = await auth.createUserWithEmailAndPassword(email, pw);
+        await cred.user.updateProfile({displayName: name});
+        currentUser = cred.user;
+        await db.collection('portfolios').doc(currentUser.uid).set({displayName:name, buys:[], sells:[], dividends:[]});
+        subscribeToDoc();
+        enterApp(name);
+      }catch(createErr){
+        if(createErr.code === 'auth/email-already-in-use'){
+          errEl.textContent = 'That account already exists — the password you entered is incorrect.';
+          confirmInput.style.display = 'none';
+          confirmInput.value = '';
+        } else {
+          errEl.textContent = 'Something went wrong: ' + createErr.message;
+        }
+      }
     }
   }catch(err){
-    if(err.code === 'auth/wrong-password') errEl.textContent = 'Incorrect password.';
-    else if(err.code === 'auth/too-many-requests') errEl.textContent = 'Too many attempts — wait a moment and try again.';
+    if(err.code === 'auth/too-many-requests') errEl.textContent = 'Too many attempts — wait a moment and try again.';
     else errEl.textContent = 'Something went wrong: ' + err.message;
   }
 }
