@@ -1,3 +1,4 @@
+[README.md](https://github.com/user-attachments/files/30634252/README.md)
 # Portfolio Manager
 
 A private, password-locked portfolio dashboard: buy ledger, sell ledger, and
