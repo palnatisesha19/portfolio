@@ -117,13 +117,15 @@
 <div id="login-screen">
   <div class="seal"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
   <h1 id="login-title">Portfolio Manager</h1>
-  <p id="login-sub">A private vault for your holdings. Set a password to protect it.</p>
+  <p id="login-sub">Enter your account name to sign in, or create a new one.</p>
   <div class="pw-form">
+    <input type="text" id="account-input" placeholder="Account name (e.g. your first name)" autocomplete="off">
     <input type="password" id="pw-input" placeholder="Password" autocomplete="off">
     <input type="password" id="pw-input-confirm" placeholder="Confirm password" style="display:none;" autocomplete="off">
     <div id="login-error"></div>
     <button class="btn-gold" id="pw-submit">Enter</button>
   </div>
+  <p style="font-size:11.5px;color:var(--text-dim);max-width:300px;margin-top:18px;line-height:1.5;">Each account name has its own private ledger — friends can share this same link and each keep a separate vault.</p>
 </div>
 
 <!-- ================= APP ================= -->
@@ -133,10 +135,10 @@
       <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
       <div>
         <h1>Portfolio Manager</h1>
-        <div class="sub">Amounts in ₹ (INR)</div>
+        <div class="sub">Amounts in ₹ (INR) &middot; Signed in as <span id="active-account-label" style="color:var(--gold)"></span></div>
       </div>
     </div>
-    <button class="lock-btn" onclick="lockApp()">Lock vault</button>
+    <button class="lock-btn" onclick="lockApp()">Switch account</button>
   </header>
 
   <nav class="tabs">
@@ -310,52 +312,85 @@ async function storageSet(key, value){
   memoryStore[key] = value;
 }
 
-async function loadState(){
-  try{ const v = await storageGet('pm_buys'); buys = v ? JSON.parse(v) : []; }catch(e){ buys = []; }
-  try{ const v = await storageGet('pm_sells'); sells = v ? JSON.parse(v) : []; }catch(e){ sells = []; }
-  try{ const v = await storageGet('pm_dividends'); dividends = v ? JSON.parse(v) : []; }catch(e){ dividends = []; }
+let currentAccount = null; // slug of the signed-in account
+
+function slugify(name){
+  return name.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
 }
-async function saveBuys(){ await storageSet('pm_buys', JSON.stringify(buys)); }
-async function saveSells(){ await storageSet('pm_sells', JSON.stringify(sells)); }
-async function saveDivs(){ await storageSet('pm_dividends', JSON.stringify(dividends)); }
+async function getAccountList(){
+  try{ const v = await storageGet('pm_accounts'); return v ? JSON.parse(v) : []; }catch(e){ return []; }
+}
+async function addToAccountList(slug, displayName){
+  const list = await getAccountList();
+  if(!list.find(a=>a.slug===slug)){ list.push({slug, displayName}); await storageSet('pm_accounts', JSON.stringify(list)); }
+}
+function keyFor(base){ return currentAccount ? base+'_'+currentAccount : base; }
+
+async function loadState(){
+  try{ const v = await storageGet(keyFor('pm_buys')); buys = v ? JSON.parse(v) : []; }catch(e){ buys = []; }
+  try{ const v = await storageGet(keyFor('pm_sells')); sells = v ? JSON.parse(v) : []; }catch(e){ sells = []; }
+  try{ const v = await storageGet(keyFor('pm_dividends')); dividends = v ? JSON.parse(v) : []; }catch(e){ dividends = []; }
+}
+async function saveBuys(){ await storageSet(keyFor('pm_buys'), JSON.stringify(buys)); }
+async function saveSells(){ await storageSet(keyFor('pm_sells'), JSON.stringify(sells)); }
+async function saveDivs(){ await storageSet(keyFor('pm_dividends'), JSON.stringify(dividends)); }
 
 /* ===================== AUTH ===================== */
-async function getStoredPw(){
-  try{ return await storageGet('pm_auth'); }catch(e){ return null; }
+async function getStoredPw(slug){
+  try{ return await storageGet('pm_auth_'+slug); }catch(e){ return null; }
 }
-async function setStoredPw(pw){ await storageSet('pm_auth', pw); }
+async function setStoredPw(slug, pw){ await storageSet('pm_auth_'+slug, pw); }
 
 async function initAuth(){
+  document.getElementById('account-input').addEventListener('blur', refreshLoginModeForAccount);
+  document.getElementById('account-input').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('pw-input').focus(); });
+}
+async function refreshLoginModeForAccount(){
+  const name = document.getElementById('account-input').value;
+  const confirmInput = document.getElementById('pw-input-confirm');
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  if(!name.trim()){ confirmInput.style.display='none'; return; }
   try{
-    const existing = await getStoredPw();
-    const confirmInput = document.getElementById('pw-input-confirm');
+    const slug = slugify(name);
+    const existing = await getStoredPw(slug);
     if(!existing){
-      document.getElementById('login-sub').textContent = 'First time here — set a password to lock your vault.';
+      document.getElementById('login-sub').textContent = `"${name.trim()}" is a new account — set a password to create it.`;
       confirmInput.style.display = 'block';
+    } else {
+      document.getElementById('login-sub').textContent = `Welcome back, ${name.trim()}. Enter your password.`;
+      confirmInput.style.display = 'none';
     }
   }catch(err){
-    document.getElementById('login-error').textContent = 'Could not check for a saved password — you can still set one now.';
-    document.getElementById('pw-input-confirm').style.display = 'block';
+    confirmInput.style.display = 'block';
   }
 }
 document.getElementById('pw-submit').addEventListener('click', handlePwSubmit);
 document.getElementById('pw-input').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
+document.getElementById('pw-input-confirm').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
 
 async function handlePwSubmit(){
   const errEl = document.getElementById('login-error');
   errEl.textContent = '';
   try{
-    const existing = await getStoredPw();
+    const name = document.getElementById('account-input').value.trim();
+    if(!name){ errEl.textContent = 'Enter an account name.'; return; }
+    const slug = slugify(name);
+    if(!slug){ errEl.textContent = 'Account name must include letters or numbers.'; return; }
+    const existing = await getStoredPw(slug);
     const pw = document.getElementById('pw-input').value;
     if(!pw){ errEl.textContent = 'Enter a password.'; return; }
     if(!existing){
       const confirmPw = document.getElementById('pw-input-confirm').value;
       if(pw.length < 4){ errEl.textContent = 'Use at least 4 characters.'; return; }
       if(pw !== confirmPw){ errEl.textContent = 'Passwords do not match.'; return; }
-      await setStoredPw(pw);
-      await enterApp();
+      const isVeryFirstAccount = (await getAccountList()).length === 0;
+      await setStoredPw(slug, pw);
+      await addToAccountList(slug, name);
+      currentAccount = slug;
+      await enterApp(isVeryFirstAccount);
     } else {
-      if(pw === existing){ await enterApp(); }
+      if(pw === existing){ currentAccount = slug; await enterApp(false); }
       else { errEl.textContent = 'Incorrect password.'; }
     }
   }catch(err){
@@ -378,26 +413,31 @@ async function seedIfEmpty(){
   ];
   await saveBuys(); await saveDivs();
 }
-async function enterApp(){
+async function enterApp(seedDemoIfEmpty){
   try{
     await loadState();
-    await seedIfEmpty();
+    if(seedDemoIfEmpty) await seedIfEmpty();
   }catch(err){
     // even if loading/seeding stumbles, still let the person in with whatever loaded
     console.error('Portfolio Manager: state load issue', err);
   }
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
+  document.getElementById('active-account-label').textContent = document.getElementById('account-input').value.trim();
   unlocked = true;
   renderAll();
 }
 function lockApp(){
   unlocked = false;
+  currentAccount = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('account-input').value = '';
   document.getElementById('pw-input').value = '';
   document.getElementById('pw-input-confirm').value = '';
+  document.getElementById('pw-input-confirm').style.display = 'none';
   document.getElementById('login-error').textContent = '';
+  document.getElementById('login-sub').textContent = 'Enter your account name to sign in, or create a new one.';
 }
 
 /* ===================== TABS ===================== */
