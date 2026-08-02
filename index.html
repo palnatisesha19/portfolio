@@ -417,7 +417,7 @@ function enterApp(name){
   document.getElementById('active-account-label').textContent = name;
   unlocked = true;
   renderAll();
-  setTimeout(()=>offerLegacyImport(name), 700); // give the first Firestore snapshot a moment to arrive
+  offerLegacyImport(name); // checks the cloud directly, no timing guesswork needed
 }
 
 /* Earlier versions of this dashboard (before Firebase) saved data in this
@@ -425,7 +425,14 @@ function enterApp(name){
    this account's Firestore doc looks empty, offer to bring it across once. */
 async function offerLegacyImport(name){
   try{
-    if(buys.length || sells.length || dividends.length) return; // already has real data, nothing to recover
+    // Check the ACTUAL cloud document directly — not the local buys/sells/dividends
+    // arrays, which depend on the realtime listener having arrived yet. This is
+    // what was causing the prompt to repeat: it was checking too early.
+    const snap = await db.collection('portfolios').doc(currentUser.uid).get();
+    const cloud = snap.exists ? (snap.data() || {}) : {};
+    const cloudHasData = (cloud.buys && cloud.buys.length) || (cloud.sells && cloud.sells.length) || (cloud.dividends && cloud.dividends.length);
+    if(cloudHasData) return; // real data already saved — nothing to recover
+
     const slug = slugify(name);
     const readLegacy = (suffixedKey, bareKey) => {
       try{
@@ -440,12 +447,24 @@ async function offerLegacyImport(name){
     if(total === 0) return;
     const ok = confirm(`Found ${oldBuys.length} buy(s), ${oldSells.length} sell(s) and ${oldDividends.length} dividend(s) saved in this browser from before accounts moved to the database. Import them into "${name}" now?`);
     if(!ok) return;
+
     buys = oldBuys; sells = oldSells; dividends = oldDividends;
     await pushDoc();
-    ['pm_buys_'+slug,'pm_sells_'+slug,'pm_dividends_'+slug,'pm_buys','pm_sells','pm_dividends'].forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
-    renderAll();
+
+    // Verify the write actually landed in Firestore before deleting the local backup —
+    // if it didn't, keep the backup so nothing gets lost.
+    const verifySnap = await db.collection('portfolios').doc(currentUser.uid).get();
+    const verifiedData = verifySnap.exists ? (verifySnap.data() || {}) : {};
+    const verified = (verifiedData.buys||[]).length === oldBuys.length && (verifiedData.dividends||[]).length === oldDividends.length;
+    if(verified){
+      ['pm_buys_'+slug,'pm_sells_'+slug,'pm_dividends_'+slug,'pm_buys','pm_sells','pm_dividends'].forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
+      renderAll();
+    } else {
+      alert('The import did not save correctly, so your local backup was kept — please check your connection and try again.');
+    }
   }catch(err){
-    console.error('Portfolio Manager: legacy import check failed', err);
+    console.error('Portfolio Manager: legacy import failed', err);
+    alert('Could not check for old local data: ' + (err && err.message ? err.message : err) + '\n\nThis is likely a Firestore permissions issue — check that your security rules match the README exactly.');
   }
 }
 function lockApp(){
