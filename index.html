@@ -120,15 +120,16 @@
 <div id="login-screen">
   <div class="seal"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
   <h1 id="login-title">Portfolio Manager</h1>
-  <p id="login-sub">Enter your account name to sign in, or create a new one.</p>
+  <p id="login-sub">Enter your email to sign in, or create a new account.</p>
   <div class="pw-form">
-    <input type="text" id="account-input" placeholder="Account name (e.g. your first name)" autocomplete="off">
+    <input type="email" id="account-input" placeholder="Email address" autocomplete="off">
     <input type="password" id="pw-input" placeholder="Password" autocomplete="off">
     <input type="password" id="pw-input-confirm" placeholder="Confirm password" style="display:none;" autocomplete="off">
     <div id="login-error"></div>
     <button class="btn-gold" id="pw-submit">Enter</button>
+    <button type="button" id="forgot-pw-link" style="background:none;border:none;color:var(--text-dim);font-size:12.5px;font-weight:500;padding:4px;text-decoration:underline;">Forgot password?</button>
   </div>
-  <p style="font-size:11.5px;color:var(--text-dim);max-width:300px;margin-top:18px;line-height:1.5;">Each account name has its own private ledger — friends can share this same link and each keep a separate vault.</p>
+  <p style="font-size:11.5px;color:var(--text-dim);max-width:300px;margin-top:18px;line-height:1.5;">Each email has its own private ledger — friends can share this same link and each keep a separate vault. Using a real email also means "Forgot password?" will work if it's ever needed.</p>
 </div>
 
 <!-- ================= APP ================= -->
@@ -318,7 +319,23 @@ if(FIREBASE_READY){
 function slugify(name){
   return name.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\-]/g,'');
 }
-function emailForAccount(name){ return slugify(name) + '@portfolio-manager.local'; }
+function looksLikeEmail(s){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s||'').trim()); }
+function emailForAccount(name){
+  const trimmed = name.trim();
+  // If the account name is a real email address, use it directly — this is what
+  // makes "Forgot password?" able to send a genuine, deliverable reset link.
+  // Plain names (no @) fall back to an internal placeholder address, same as before.
+  return looksLikeEmail(trimmed) ? trimmed.toLowerCase() : slugify(trimmed) + '@portfolio-manager.local';
+}
+function legacyEmailForAccount(name){ return slugify(name.trim()) + '@portfolio-manager.local'; }
+async function trySignIn(email, pw){
+  try{
+    return await auth.signInWithEmailAndPassword(email, pw);
+  }catch(e){
+    if(['auth/user-not-found','auth/invalid-credential','auth/wrong-password'].includes(e.code)) return null;
+    throw e;
+  }
+}
 
 /* Local writes update Firestore; a realtime listener on the same document
    pushes any change (from this device or any other signed-in device) back
@@ -353,6 +370,27 @@ async function initAuth(){
   document.getElementById('pw-input').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
   document.getElementById('pw-input-confirm').addEventListener('keydown', e=>{ if(e.key==='Enter') handlePwSubmit(); });
   document.getElementById('account-input').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('pw-input').focus(); });
+  document.getElementById('forgot-pw-link').addEventListener('click', handleForgotPassword);
+}
+
+async function handleForgotPassword(){
+  const errEl = document.getElementById('login-error');
+  errEl.style.color = '';
+  errEl.textContent = '';
+  if(!FIREBASE_READY){ errEl.textContent = 'Database not configured yet — see the README.'; return; }
+  const name = document.getElementById('account-input').value.trim();
+  if(!name){ errEl.textContent = 'Type your email above first, then tap "Forgot password?" again.'; return; }
+  if(!looksLikeEmail(name)){
+    errEl.textContent = `"${name}" doesn't look like a real email, so there's no inbox to send a reset link to — double-check your password, or ask whoever set up your account for help.`;
+    return;
+  }
+  try{
+    await auth.sendPasswordResetEmail(name.toLowerCase());
+    errEl.style.color = 'var(--teal)';
+    errEl.textContent = `If an account exists for ${name}, a password reset link was just sent — check your inbox (and spam folder).`;
+  }catch(err){
+    errEl.textContent = 'Could not send reset email: ' + (err && err.message ? err.message : err);
+  }
 }
 
 async function handlePwSubmit(){
@@ -361,10 +399,11 @@ async function handlePwSubmit(){
   if(!FIREBASE_READY){ errEl.textContent = 'Database not configured yet — see the README.'; return; }
   const name = document.getElementById('account-input').value.trim();
   const pw = document.getElementById('pw-input').value;
-  if(!name){ errEl.textContent = 'Enter an account name.'; return; }
-  if(!slugify(name)){ errEl.textContent = 'Account name must include letters or numbers.'; return; }
+  if(!name){ errEl.textContent = 'Enter your email address.'; return; }
+  if(!looksLikeEmail(name)){ errEl.textContent = 'Please enter a real email address — this keeps your account recoverable if you ever forget your password.'; return; }
   if(!pw){ errEl.textContent = 'Enter a password.'; return; }
   const email = emailForAccount(name);
+  const legacyEmail = legacyEmailForAccount(name);
   const confirmInput = document.getElementById('pw-input-confirm');
   try{
     // Always try signing in first — this works whether or not the account
@@ -372,11 +411,25 @@ async function handlePwSubmit(){
     // (on by default for newer projects), which makes it impossible to
     // reliably ask "does this account exist yet?" ahead of time.
     try{
-      const cred = await auth.signInWithEmailAndPassword(email, pw);
-      currentUser = cred.user;
-      subscribeToDoc();
-      enterApp(name);
-      return;
+      let cred = await trySignIn(email, pw);
+      let signedInViaLegacy = false;
+      if(!cred && legacyEmail !== email){
+        cred = await trySignIn(legacyEmail, pw);
+        signedInViaLegacy = !!cred;
+      }
+      if(cred){
+        currentUser = cred.user;
+        if(signedInViaLegacy){
+          // One-time quiet upgrade: link this account to its real email so
+          // "Forgot password?" works for it from now on. Safe to ignore if it
+          // fails (e.g. needs a very recent login) — it'll just retry next time.
+          try{ await currentUser.updateEmail(email); }catch(mig){ /* non-fatal */ }
+        }
+        subscribeToDoc();
+        enterApp(name);
+        return;
+      }
+      throw {code:'auth/user-not-found'};
     }catch(signInErr){
       const notFoundLike = ['auth/user-not-found','auth/invalid-credential','auth/wrong-password'].includes(signInErr.code);
       if(!notFoundLike) throw signInErr;
@@ -480,7 +533,7 @@ function lockApp(){
   document.getElementById('pw-input-confirm').value = '';
   document.getElementById('pw-input-confirm').style.display = 'none';
   document.getElementById('login-error').textContent = '';
-  document.getElementById('login-sub').textContent = 'Enter your account name to sign in, or create a new one.';
+  document.getElementById('login-sub').textContent = 'Enter your email to sign in, or create a new account.';
 }
 
 /* ===================== TABS ===================== */
