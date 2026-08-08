@@ -419,14 +419,21 @@ async function handlePwSubmit(){
       }
       if(cred){
         currentUser = cred.user;
+        let migrationNoticeSent = false;
         if(signedInViaLegacy){
-          // One-time quiet upgrade: link this account to its real email so
-          // "Forgot password?" works for it from now on. Safe to ignore if it
-          // fails (e.g. needs a very recent login) — it'll just retry next time.
-          try{ await currentUser.updateEmail(email); }catch(mig){ /* non-fatal */ }
+          // One-time upgrade: link this account to its real email so
+          // "Forgot password?" works for it from now on. Firebase requires
+          // this to go through a verification link sent to the new address
+          // (the older, direct updateEmail() method is deprecated and now
+          // fails silently on newer projects) — so this needs one click in
+          // that email before the change actually takes effect.
+          try{ await currentUser.verifyBeforeUpdateEmail(email); migrationNoticeSent = true; }catch(mig){ /* non-fatal — will retry next login */ }
         }
         subscribeToDoc();
         enterApp(name);
+        if(migrationNoticeSent){
+          setTimeout(()=>alert(`One-time step: to enable "Forgot password?" for this account, we just sent a confirmation link to ${email}. Click it whenever you get a chance — nothing else changes until you do, you're already signed in.`), 400);
+        }
         return;
       }
       throw {code:'auth/user-not-found'};
